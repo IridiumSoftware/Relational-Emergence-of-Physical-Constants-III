@@ -1,0 +1,64 @@
+import random
+from collections import defaultdict
+import numpy as np
+import pandas as pd
+
+random.seed(42)
+
+class HypergraphMR:
+    def __init__(self, n_nodes=300, max_arity=3):
+        self.nodes = list(range(n_nodes))
+        self.hyperedges = defaultdict(float)
+        for _ in range(4 * n_nodes):
+            arity = random.randint(2, max_arity)
+            edge = frozenset(random.sample(self.nodes, arity))
+            self.hyperedges[edge] = random.uniform(0.1, 1.0)
+    
+    def step(self, decay=0.99995, noise=0.03):
+        active = [e for e, w in self.hyperedges.items() if w > 1e-10]
+        if not active:
+            return
+        chosen = random.choice(active)
+        energy = self.hyperedges[chosen]
+        for _ in range(random.randint(1, 2)):
+            new_node = max(self.nodes) + 1
+            self.nodes.append(new_node)
+            new_edge = frozenset(random.sample(self.nodes, 2))
+            self.hyperedges[new_edge] = energy / 3
+        for e in list(self.hyperedges):
+            self.hyperedges[e] *= decay
+            if self.hyperedges[e] < 1e-6:
+                del self.hyperedges[e]
+        for e in list(self.hyperedges):
+            if random.random() < noise:
+                self.hyperedges[e] *= random.uniform(0.94, 1.06)
+                if self.hyperedges[e] < 1e-6:
+                    del self.hyperedges[e]
+    
+    def invariants(self):
+        min_w = min(self.hyperedges.values()) if self.hyperedges else 0
+        degrees = defaultdict(int)
+        for e in self.hyperedges:
+            for n in e:
+                degrees[n] += 1
+        avg_deg = np.mean(list(degrees.values())) if degrees else 0
+        max_deg = max(degrees.values()) if degrees else 1
+        clust_proxy = avg_deg / max_deg
+        return min_w, clust_proxy
+
+def ensemble_run(n_runs=50):
+    results = []
+    for i in range(n_runs):
+        hg = HypergraphMR()
+        for s in range(80):
+            hg.step()
+        min_w, clust = hg.invariants()
+        results.append({'run': i, 'min_w': min_w, 'clust_proxy': clust})
+    df = pd.DataFrame(results)
+    return df
+
+df = ensemble_run(50)
+print(df.describe())
+# Bootstrap CI example
+boot_means = [np.mean(np.random.choice(df['min_w'], len(df), replace=True)) for _ in range(1000)]
+print("Bootstrap 95% CI min_w:", np.percentile(boot_means, [2.5, 97.5]))
